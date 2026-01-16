@@ -1,0 +1,43 @@
+version: '3'
+
+vars:
+  PYTHON: python3
+  DATA_DIR: data
+  MODELS_DIR: models
+  LOGS_DIR: logs
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  setup:
+    desc: Set up the project (install dependencies, create directories)
+    cmds:
+      - |
+        echo "Creating directories..."
+        mkdir -p {{.DATA_DIR}}/tiles {{.DATA_DIR}}/cache {{.MODELS_DIR}} {{.LOGS_DIR}}
+      - |
+        echo "Installing dependencies..."
+        pip install -r requirements.txt
+
+  download:
+    desc: Download OSM tiles for training
+    cmds:
+      - "{{.PYTHON}} scripts/download_tiles.py"
+
+  train:
+    desc: Train the map compression model
+    cmds:
+      - "{{.PYTHON}} scripts/train.py"
+
+  serve:
+    desc: Start the web server for tile visualization
+    cmds:
+      - "{{.PYTHON}} scripts/serve.py"
+
+  tensorboard:
+    desc: Launch TensorBoard to view training metrics
+    cmds:
+      - tensorboard --logdir {{.LOGS_DIR}}
