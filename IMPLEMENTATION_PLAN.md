@@ -118,7 +118,7 @@ Based on common approaches, I'd suggest:
 - **CNN or ViT-based autoencoder** for image compression
 - **Coordinate-based MLP** (like NeRF) for direct lat/lon → image mapping
 - **OpenStreetMap tiles** as initial data source (free, no API keys needed)
-- **256x256 tiles** at zoom levels 0-10 to start (manageable dataset size)
+- **256x256 tiles** at zoom levels 0-9 to start (manageable dataset size)
 
 ## Next Steps
 1. Answer the questions above

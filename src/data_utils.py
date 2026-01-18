@@ -13,8 +13,15 @@ def deg2num(lat_deg, lon_deg, zoom):
     """Convert lat/lon to tile coordinates."""
     lat_rad = math.radians(lat_deg)
     n = 2.0 ** zoom
+    max_tile = n - 1
+    
     xtile = int((lon_deg + 180.0) / 360.0 * n)
     ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+    
+    # Clamp to valid tile coordinate ranges [0, 2^zoom - 1]
+    xtile = max(0, min(max_tile, xtile))
+    ytile = max(0, min(max_tile, ytile))
+    
     return (xtile, ytile)
 
 
@@ -67,12 +74,29 @@ def download_tile(xtile, ytile, zoom, cache_dir, retry=3):
 
 def get_tiles_in_region(min_lat, max_lat, min_lon, max_lon, zoom):
     """Get all tile coordinates in a bounding box."""
+    n = 2 ** zoom
+    max_tile_coord = n - 1
+    
+    # Clamp coordinates to valid range
     min_tile = deg2num(max_lat, min_lon, zoom)
     max_tile = deg2num(min_lat, max_lon, zoom)
     
+    # Clamp to valid tile coordinate ranges [0, 2^zoom - 1]
+    min_x = max(0, min(min_tile[0], max_tile[0]))
+    max_x = min(max_tile_coord, max(min_tile[0], max_tile[0]))
+    min_y = max(0, min(min_tile[1], max_tile[1]))
+    max_y = min(max_tile_coord, max(min_tile[1], max_tile[1]))
+    
+    # Handle full globe case
+    is_full_globe = (min_lat <= -90 and max_lat >= 90 and 
+                     min_lon <= -180 and max_lon >= 180)
+    if is_full_globe:
+        min_x, max_x = 0, max_tile_coord
+        min_y, max_y = 0, max_tile_coord
+    
     tiles = []
-    for x in range(min_tile[0], max_tile[0] + 1):
-        for y in range(min_tile[1], max_tile[1] + 1):
+    for x in range(min_x, max_x + 1):
+        for y in range(min_y, max_y + 1):
             tiles.append((x, y))
     return tiles
 

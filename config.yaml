@@ -19,7 +19,7 @@ training:
 # Data Configuration
 data:
   min_zoom: 0
-  max_zoom: 10
+  max_zoom: 9
   tile_size: 256  # Can be changed to 512
   num_tiles_per_zoom: 1000  # Number of random tiles to download per zoom level
   cache_dir: data/cache

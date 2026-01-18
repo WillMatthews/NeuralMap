@@ -1,7 +1,7 @@
 version: '3'
 
 vars:
-  PYTHON: python3
+  PYTHON: uv run python
   DATA_DIR: data
   MODELS_DIR: models
   LOGS_DIR: logs
@@ -20,7 +20,7 @@ tasks:
         mkdir -p {{.DATA_DIR}}/tiles {{.DATA_DIR}}/cache {{.MODELS_DIR}} {{.LOGS_DIR}}
       - |
         echo "Installing dependencies..."
-        pip install -r requirements.txt
+        uv sync
 
   download:
     desc: Download OSM tiles for training
@@ -40,4 +40,4 @@ tasks:
   tensorboard:
     desc: Launch TensorBoard to view training metrics
     cmds:
-      - tensorboard --logdir {{.LOGS_DIR}}
+      - uv run tensorboard --logdir {{.LOGS_DIR}}

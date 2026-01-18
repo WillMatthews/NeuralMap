@@ -51,20 +51,16 @@ def main():
     for zoom in range(min_zoom, max_zoom + 1):
         print(f"\nProcessing zoom level {zoom}...")
         
-        # For full globe, generate random tile coordinates directly (more efficient)
+        # Get all tiles in region
+        all_tiles = get_tiles_in_region(min_lat, max_lat, min_lon, max_lon, zoom)
+        
+        # For full globe, we get all tiles methodically
+        # For other regions, sample if we have more than needed
         if is_full_globe:
-            max_tile = 2 ** zoom
-            # Generate random tile coordinates
-            tiles = []
-            for _ in range(num_tiles_per_zoom):
-                x = random.randint(0, max_tile - 1)
-                y = random.randint(0, max_tile - 1)
-                tiles.append((x, y))
-            print(f"Generated {len(tiles)} random tiles for zoom {zoom} (full globe)")
+            # For full globe, download all tiles (methodical approach)
+            tiles = all_tiles
+            print(f"Downloading all {len(tiles)} tiles for zoom {zoom} (full globe: {2**(2*zoom)} expected)")
         else:
-            # Get all tiles in region
-            all_tiles = get_tiles_in_region(min_lat, max_lat, min_lon, max_lon, zoom)
-            
             # Sample random tiles if we have more than needed
             if len(all_tiles) > num_tiles_per_zoom:
                 tiles = random.sample(all_tiles, num_tiles_per_zoom)
@@ -76,8 +72,20 @@ def main():
         zoom_dir = Path(tiles_dir) / str(zoom)
         zoom_dir.mkdir(parents=True, exist_ok=True)
         
+        # Pre-filter tiles that already exist in destination directory
+        # This avoids expensive operations for already-downloaded files
+        tiles_to_download = []
+        for xtile, ytile in tiles:
+            tile_path = zoom_dir / f"{zoom}_{xtile}_{ytile}.png"
+            if not tile_path.exists():
+                tiles_to_download.append((xtile, ytile))
+        
+        if len(tiles_to_download) < len(tiles):
+            skipped = len(tiles) - len(tiles_to_download)
+            print(f"Skipping {skipped} already downloaded tiles")
+        
         downloaded = 0
-        for xtile, ytile in tqdm(tiles, desc=f"Zoom {zoom}"):
+        for xtile, ytile in tqdm(tiles_to_download, desc=f"Zoom {zoom}"):
             # Download tile
             cache_path = download_tile(xtile, ytile, zoom, cache_dir)
             
@@ -88,14 +96,18 @@ def main():
                     import shutil
                     shutil.copy(cache_path, tile_path)
                 downloaded += 1
-                total_tiles += 1
             
             # Be nice to OSM servers
-            time.sleep(0.1)
+            time.sleep(0.21)
         
-        print(f"Downloaded {downloaded}/{len(tiles)} tiles for zoom {zoom}")
+        # Count total including already downloaded
+        already_downloaded = len(tiles) - len(tiles_to_download)
+        total_for_zoom = downloaded + already_downloaded
+        total_tiles += total_for_zoom  # Add all tiles (new + already downloaded) to total
+        
+        print(f"Downloaded {downloaded} new tiles, {total_for_zoom}/{len(tiles)} total for zoom {zoom}")
     
-    print(f"\nTotal tiles downloaded: {total_tiles}")
+    print(f"\nTotal tiles available: {total_tiles}")
     print(f"Tiles saved to: {tiles_dir}")
 
 
