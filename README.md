@@ -16,21 +16,38 @@ This project uses a coordinate-based transformer model that learns to map geogra
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.12+
+- [uv](https://github.com/astral-sh/uv) (Python package manager)
 - PyTorch 2.0+
 - CUDA-capable GPU (recommended, tested on RTX 2060 Super)
 - ~8GB VRAM for training
 
 ## Setup
 
-1. Install dependencies:
+1. Install `uv` if you haven't already:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+2. Install dependencies and set up the project:
 ```bash
 task setup
 ```
 
 Or manually:
 ```bash
-pip install -r requirements.txt
+uv sync
+mkdir -p data/tiles data/cache models logs
+```
+
+All Python commands should be run through `uv`:
+```bash
+uv run python scripts/train.py
+```
+
+Or use the task runner (which uses `uv` under the hood):
+```bash
+task train
 ```
 
 2. Configure the project by editing `config.yaml`:
