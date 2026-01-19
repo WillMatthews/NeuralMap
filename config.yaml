@@ -1,11 +1,16 @@
 # Model Configuration
 model:
+  # Neural field architecture with Fourier features
   hidden_dim: 256
-  num_layers: 8
-  num_heads: 8
+  num_mlp_layers: 8  # Number of MLP layers in coordinate network
+  num_frequencies: 10  # Number of frequency bands for Fourier encoding
   dropout: 0.1
-  use_positional_encoding: true
-  positional_encoding_dim: 128
+  num_attention_blocks: 2  # Number of attention blocks in U-Net decoder
+  # Legacy parameters (for backward compatibility)
+  num_layers: 8  # Alias for num_mlp_layers
+  num_heads: 8  # Used in attention blocks
+  use_positional_encoding: true  # Now uses Fourier features instead
+  positional_encoding_dim: 128  # Not used with Fourier features
 
 # Training Configuration
 training:
@@ -15,6 +20,17 @@ training:
   weight_decay: 1e-5
   save_interval: 10  # Save checkpoint every N epochs
   log_interval: 100  # Log metrics every N batches
+  # Hierarchical training: train zoom levels progressively
+  # Each level trains 4x more epochs than the next level
+  hierarchical_training: true
+  base_epochs_per_zoom: 5  # Base epochs for highest zoom level
+  # Epochs will be: base_epochs_per_zoom * (4 ^ (max_zoom - current_zoom))
+  # Example with max_zoom=9, base_epochs=5:
+  #   zoom 0 only: 5 * 4^9 = 1,310,720 epochs
+  #   zoom 0-1:    5 * 4^8 = 327,680 epochs
+  #   zoom 0-2:    5 * 4^7 = 81,920 epochs
+  #   ...
+  #   zoom 0-9:    5 * 4^0 = 5 epochs
   
 # Data Configuration
 data:
@@ -38,3 +54,4 @@ paths:
   models_dir: models
   logs_dir: logs
   data_dir: data
+  runs_dir: runs  # Directory for run metadata (JSON files) - committed to git

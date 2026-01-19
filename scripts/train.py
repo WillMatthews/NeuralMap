@@ -19,6 +19,7 @@ import time
 
 from src.model import CoordinateTransformer
 from src.dataset import MapTileDataset
+from src.run_utils import generate_run_id, save_run_metadata
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device, epoch, writer, log_interval):
@@ -92,6 +93,58 @@ def validate(model, dataloader, criterion, device, epoch, writer):
     return avg_loss
 
 
+def train_zoom_level(model, train_loader, val_loader, criterion, optimizer, device, 
+                     writer, zoom_level, num_epochs, save_interval, log_interval,
+                     models_dir, global_epoch_offset, run_id):
+    """Train model on a specific zoom level."""
+    best_val_loss = float('inf')
+    
+    print(f"\n{'='*60}")
+    print(f"Training on zoom levels 0-{zoom_level}")
+    print(f"Epochs: {num_epochs}")
+    print(f"{'='*60}\n")
+    
+    for epoch in range(1, num_epochs + 1):
+        global_epoch = global_epoch_offset + epoch
+        start_time = time.time()
+        
+        # Train
+        train_loss = train_epoch(
+            model, train_loader, criterion, optimizer,
+            device, global_epoch, writer, log_interval
+        )
+        
+        # Validate
+        val_loss = validate(model, val_loader, criterion, device, global_epoch, writer)
+        
+        epoch_time = time.time() - start_time
+        print(f"Zoom 0-{zoom_level} | Epoch {epoch}/{num_epochs} (Global: {global_epoch}) - "
+              f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f} "
+              f"({epoch_time:.1f}s)")
+        
+        # Save checkpoint
+        if epoch % save_interval == 0 or val_loss < best_val_loss:
+            checkpoint = {
+                'epoch': global_epoch,
+                'zoom_level': zoom_level,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_loss': val_loss,
+            }
+            
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                # Save with run ID prefix
+                torch.save(checkpoint, models_dir / f'{run_id}_best_model.pt')
+                # Also save as best_model.pt for backward compatibility
+                torch.save(checkpoint, models_dir / 'best_model.pt')
+                print(f"Saved best model (val_loss: {val_loss:.4f})")
+            
+            torch.save(checkpoint, models_dir / f'{run_id}_checkpoint_epoch_{global_epoch}.pt')
+    
+    return global_epoch
+
+
 def main():
     # Load config
     with open('config.yaml', 'r') as f:
@@ -101,44 +154,50 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Create directories
+    # Generate run ID and save metadata
+    run_id = generate_run_id()
+    runs_dir = Path(config['paths'].get('runs_dir', 'runs'))
     models_dir = Path(config['paths']['models_dir'])
     logs_dir = Path(config['paths']['logs_dir'])
+    
+    # Create directories
     models_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    runs_dir.mkdir(parents=True, exist_ok=True)
     
-    # Dataset
-    train_dataset = MapTileDataset(config_path='config.yaml', split='train')
-    val_dataset = MapTileDataset(config_path='config.yaml', split='val')
+    # Create run-specific directories
+    run_logs_dir = logs_dir / run_id
+    run_logs_dir.mkdir(parents=True, exist_ok=True)
     
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config['training']['batch_size'],
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True
+    print(f"\n{'='*60}")
+    print(f"Run ID: {run_id}")
+    print(f"{'='*60}\n")
+    
+    # Save run metadata
+    metadata_file = save_run_metadata(
+        run_id=run_id,
+        config=config,
+        runs_dir=runs_dir,
+        additional_metadata={
+            'device': str(device),
+            'logs_dir': str(run_logs_dir),
+            'models_dir': str(models_dir)
+        }
     )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config['training']['batch_size'],
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-    )
-    
-    print(f"Train samples: {len(train_dataset)}")
-    print(f"Val samples: {len(val_dataset)}")
+    print(f"Run metadata saved to: {metadata_file}")
     
     # Model
     model_config = config['model']
     data_config = config['data']
-    model = CoordinateTransformer(
+    
+    # Use new neural field architecture
+    from src.model import CoordinateNeuralField
+    model = CoordinateNeuralField(
         hidden_dim=model_config['hidden_dim'],
-        num_layers=model_config['num_layers'],
-        num_heads=model_config['num_heads'],
+        num_mlp_layers=model_config.get('num_mlp_layers', model_config.get('num_layers', 8)),
+        num_frequencies=model_config.get('num_frequencies', 10),
+        tile_size=data_config['tile_size'],
         dropout=model_config['dropout'],
-        positional_encoding_dim=model_config['positional_encoding_dim'],
-        tile_size=data_config['tile_size']
+        num_attention_blocks=model_config.get('num_attention_blocks', 2)
     ).to(device)
     
     # Count parameters
@@ -153,50 +212,149 @@ def main():
         weight_decay=float(config['training']['weight_decay'])
     )
     
-    # TensorBoard
-    writer = SummaryWriter(log_dir=str(logs_dir))
+    # TensorBoard - use run-specific log directory
+    writer = SummaryWriter(log_dir=str(run_logs_dir))
     
-    # Training loop
-    num_epochs = config['training']['num_epochs']
+    # Training configuration
     save_interval = config['training']['save_interval']
     log_interval = config['training']['log_interval']
+    min_zoom = data_config['min_zoom']
+    max_zoom = data_config['max_zoom']
     
-    best_val_loss = float('inf')
+    # Check if hierarchical training is enabled
+    hierarchical = config['training'].get('hierarchical_training', False)
     
-    print("\nStarting training...")
-    for epoch in range(1, num_epochs + 1):
-        start_time = time.time()
+    if hierarchical:
+        base_epochs = config['training'].get('base_epochs_per_zoom', 20)
+        print(f"\n{'='*60}")
+        print("HIERARCHICAL TRAINING MODE")
+        print(f"Training progressively: zoom 0 -> zoom {max_zoom}")
+        print(f"Base epochs per zoom: {base_epochs}")
+        print(f"{'='*60}\n")
         
-        # Train
-        train_loss = train_epoch(
-            model, train_loader, criterion, optimizer,
-            device, epoch, writer, log_interval
+        global_epoch_offset = 0
+        
+        # Train progressively on each zoom level
+        # Each zoom level has 4x the information of the next level,
+        # so we train 4x more epochs for lower zoom levels
+        # This ensures the model learns global patterns (zoom 0) perfectly
+        # before adding finer details at higher zoom levels
+        print("\nTraining schedule:")
+        total_epochs = 0
+        for z in range(min_zoom, max_zoom + 1):
+            zoom_diff = max_zoom - z
+            epochs = base_epochs * (4 ** zoom_diff)
+            total_epochs += epochs
+            print(f"  Zoom 0-{z}: {epochs:,} epochs")
+        print(f"Total epochs: {total_epochs:,}\n")
+        
+        for current_max_zoom in range(min_zoom, max_zoom + 1):
+            zoom_diff = max_zoom - current_max_zoom
+            num_epochs = base_epochs * (4 ** zoom_diff)
+            
+            print(f"\nPreparing datasets for zoom levels 0-{current_max_zoom}...")
+            
+            # Create datasets filtered by current max zoom
+            train_dataset = MapTileDataset(
+                config_path='config.yaml', 
+                split='train',
+                max_zoom_filter=current_max_zoom
+            )
+            val_dataset = MapTileDataset(
+                config_path='config.yaml', 
+                split='val',
+                max_zoom_filter=current_max_zoom
+            )
+            
+            train_loader = DataLoader(
+                train_dataset,
+                batch_size=config['training']['batch_size'],
+                shuffle=True,
+                num_workers=4,
+                pin_memory=True
+            )
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=config['training']['batch_size'],
+                shuffle=False,
+                num_workers=4,
+                pin_memory=True
+            )
+            
+            print(f"Train samples: {len(train_dataset)}")
+            print(f"Val samples: {len(val_dataset)}")
+            
+            # Train on this zoom level
+            global_epoch_offset = train_zoom_level(
+                model, train_loader, val_loader, criterion, optimizer,
+                device, writer, current_max_zoom, num_epochs,
+                save_interval, log_interval, models_dir, global_epoch_offset, run_id
+            )
+    else:
+        # Standard training: all zoom levels at once
+        print("\nStandard training mode: all zoom levels together\n")
+        
+        train_dataset = MapTileDataset(config_path='config.yaml', split='train')
+        val_dataset = MapTileDataset(config_path='config.yaml', split='val')
+        
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config['training']['batch_size'],
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=config['training']['batch_size'],
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True
         )
         
-        # Validate
-        val_loss = validate(model, val_loader, criterion, device, epoch, writer)
+        print(f"Train samples: {len(train_dataset)}")
+        print(f"Val samples: {len(val_dataset)}")
         
-        epoch_time = time.time() - start_time
-        print(f"Epoch {epoch}/{num_epochs} - "
-              f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f} "
-              f"({epoch_time:.1f}s)")
+        num_epochs = config['training']['num_epochs']
+        best_val_loss = float('inf')
         
-        # Save checkpoint
-        if epoch % save_interval == 0 or val_loss < best_val_loss:
-            checkpoint = {
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'val_loss': val_loss,
-                'config': config
-            }
+        print("\nStarting training...")
+        for epoch in range(1, num_epochs + 1):
+            start_time = time.time()
             
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                torch.save(checkpoint, models_dir / 'best_model.pt')
-                print(f"Saved best model (val_loss: {val_loss:.4f})")
+            # Train
+            train_loss = train_epoch(
+                model, train_loader, criterion, optimizer,
+                device, epoch, writer, log_interval
+            )
             
-            torch.save(checkpoint, models_dir / f'checkpoint_epoch_{epoch}.pt')
+            # Validate
+            val_loss = validate(model, val_loader, criterion, device, epoch, writer)
+            
+            epoch_time = time.time() - start_time
+            print(f"Epoch {epoch}/{num_epochs} - "
+                  f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f} "
+                  f"({epoch_time:.1f}s)")
+            
+            # Save checkpoint
+            if epoch % save_interval == 0 or val_loss < best_val_loss:
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_loss': val_loss,
+                    'config': config
+                }
+                
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    # Save with run ID prefix
+                    torch.save(checkpoint, models_dir / f'{run_id}_best_model.pt')
+                    # Also save as best_model.pt for backward compatibility
+                    torch.save(checkpoint, models_dir / 'best_model.pt')
+                    print(f"Saved best model (val_loss: {val_loss:.4f})")
+                
+                torch.save(checkpoint, models_dir / f'{run_id}_checkpoint_epoch_{epoch}.pt')
     
     writer.close()
     print("\nTraining complete!")

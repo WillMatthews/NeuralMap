@@ -26,6 +26,9 @@ models/*.ckpt
 logs/
 *.log
 
+# Run metadata (runs/ directory is committed to git)
+# runs/ is NOT ignored - metadata JSON files should be committed
+
 # IDE
 .vscode/
 .idea/

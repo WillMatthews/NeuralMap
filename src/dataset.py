@@ -16,7 +16,7 @@ from src.data_utils import (
 class MapTileDataset(Dataset):
     """Dataset for map tiles with coordinate inputs."""
     
-    def __init__(self, config_path='config.yaml', split='train'):
+    def __init__(self, config_path='config.yaml', split='train', max_zoom_filter=None):
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         
@@ -34,6 +34,10 @@ class MapTileDataset(Dataset):
         
         # Load tile list
         self.tiles = self._load_tile_list()
+        
+        # Filter by max zoom if specified (for hierarchical training)
+        if max_zoom_filter is not None:
+            self.tiles = [(z, x, y) for z, x, y in self.tiles if z <= max_zoom_filter]
         
         # Split dataset
         random.seed(42)

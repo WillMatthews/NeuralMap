@@ -15,7 +15,7 @@ import io
 import numpy as np
 from pathlib import Path
 
-from src.model import CoordinateTransformer
+from src.model import CoordinateNeuralField
 from src.data_utils import deg2num, num2deg, get_tile_url, lat_lon_to_normalized
 
 
@@ -58,13 +58,13 @@ def load_model():
     # Create model
     model_config = config['model']
     data_config = config['data']
-    model = CoordinateTransformer(
+    model = CoordinateNeuralField(
         hidden_dim=model_config['hidden_dim'],
-        num_layers=model_config['num_layers'],
-        num_heads=model_config['num_heads'],
+        num_mlp_layers=model_config.get('num_mlp_layers', model_config.get('num_layers', 8)),
+        num_frequencies=model_config.get('num_frequencies', 10),
+        tile_size=data_config['tile_size'],
         dropout=model_config['dropout'],
-        positional_encoding_dim=model_config['positional_encoding_dim'],
-        tile_size=data_config['tile_size']
+        num_attention_blocks=model_config.get('num_attention_blocks', 2)
     ).to(device)
     
     model.load_state_dict(checkpoint['model_state_dict'])
