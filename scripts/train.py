@@ -149,8 +149,8 @@ def main():
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(
         model.parameters(),
-        lr=config['training']['learning_rate'],
-        weight_decay=config['training']['weight_decay']
+        lr=float(config['training']['learning_rate']),
+        weight_decay=float(config['training']['weight_decay'])
     )
     
     # TensorBoard
