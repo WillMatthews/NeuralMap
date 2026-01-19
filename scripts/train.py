@@ -254,15 +254,10 @@ def main():
             
             print(f"\nPreparing datasets for zoom levels 0-{current_max_zoom}...")
             
-            # Create datasets filtered by current max zoom
+            # Create dataset with ALL tiles (no splitting - learning entire globe)
             train_dataset = MapTileDataset(
                 config_path='config.yaml', 
-                split='train',
-                max_zoom_filter=current_max_zoom
-            )
-            val_dataset = MapTileDataset(
-                config_path='config.yaml', 
-                split='val',
+                split=None,  # Use all tiles
                 max_zoom_filter=current_max_zoom
             )
             
@@ -273,6 +268,17 @@ def main():
                 num_workers=4,
                 pin_memory=True
             )
+            
+            print(f"Training samples: {len(train_dataset)} (using ALL available tiles)")
+            
+            # Skip if no training samples
+            if len(train_dataset) == 0:
+                print(f"Warning: No training samples for zoom levels 0-{current_max_zoom}. Skipping...")
+                continue
+            
+            # For validation, use a small random sample from the same dataset
+            # This is just for monitoring - we train on ALL data
+            val_dataset = train_dataset
             val_loader = DataLoader(
                 val_dataset,
                 batch_size=config['training']['batch_size'],
@@ -280,9 +286,6 @@ def main():
                 num_workers=4,
                 pin_memory=True
             )
-            
-            print(f"Train samples: {len(train_dataset)}")
-            print(f"Val samples: {len(val_dataset)}")
             
             # Train on this zoom level
             global_epoch_offset = train_zoom_level(
@@ -294,8 +297,9 @@ def main():
         # Standard training: all zoom levels at once
         print("\nStandard training mode: all zoom levels together\n")
         
-        train_dataset = MapTileDataset(config_path='config.yaml', split='train')
-        val_dataset = MapTileDataset(config_path='config.yaml', split='val')
+        # Use ALL tiles (no splitting - learning entire globe)
+        train_dataset = MapTileDataset(config_path='config.yaml', split=None)
+        val_dataset = train_dataset  # Use same dataset for validation monitoring
         
         train_loader = DataLoader(
             train_dataset,
@@ -312,8 +316,7 @@ def main():
             pin_memory=True
         )
         
-        print(f"Train samples: {len(train_dataset)}")
-        print(f"Val samples: {len(val_dataset)}")
+        print(f"Training samples: {len(train_dataset)} (using ALL available tiles)")
         
         num_epochs = config['training']['num_epochs']
         best_val_loss = float('inf')

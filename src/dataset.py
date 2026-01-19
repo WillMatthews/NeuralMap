@@ -39,14 +39,24 @@ class MapTileDataset(Dataset):
         if max_zoom_filter is not None:
             self.tiles = [(z, x, y) for z, x, y in self.tiles if z <= max_zoom_filter]
         
-        # Split dataset
-        random.seed(42)
-        random.shuffle(self.tiles)
-        split_idx = int(len(self.tiles) * 0.9)
-        if split == 'train':
-            self.tiles = self.tiles[:split_idx]
+        # Split dataset (if split is None or 'all', use all tiles)
+        if split is None or split == 'all':
+            # Use all tiles - no splitting for learning the entire globe
+            pass
         else:
-            self.tiles = self.tiles[split_idx:]
+            # Only split if explicitly requested
+            random.seed(42)
+            random.shuffle(self.tiles)
+            split_idx = int(len(self.tiles) * 0.9)
+            # Ensure at least 1 sample in each split for very small datasets
+            if split_idx == 0 and len(self.tiles) > 0:
+                split_idx = min(1, len(self.tiles))
+            elif split_idx == len(self.tiles) and len(self.tiles) > 1:
+                split_idx = len(self.tiles) - 1
+            if split == 'train':
+                self.tiles = self.tiles[:split_idx]
+            elif split == 'val':
+                self.tiles = self.tiles[split_idx:]
     
     def _load_tile_list(self):
         """Load list of available tiles."""
