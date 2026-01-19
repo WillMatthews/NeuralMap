@@ -195,7 +195,11 @@ class UNetDecoder(nn.Module):
         
         for i in range(num_stages):
             in_ch = channels[min(i, len(channels)-1)]
-            out_ch = channels[min(i+1, len(channels)-1)] if i+1 < len(channels) else 3
+            # Last stage should output 3 channels (RGB)
+            if i == num_stages - 1:
+                out_ch = 3
+            else:
+                out_ch = channels[min(i+1, len(channels)-1)] if i+1 < len(channels) else channels[-1]
             
             # Upsampling block
             self.upsample_blocks.append(nn.Sequential(
